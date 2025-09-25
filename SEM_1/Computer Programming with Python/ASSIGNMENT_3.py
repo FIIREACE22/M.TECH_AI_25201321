@@ -42,6 +42,19 @@ for i in range(8,6+e):
 for i in range(13+e,13,-1):
   print(prime[i],end=" ")
 
+'''  
+Output : 
+1  2  3  4  5  7  11  13  
+                     17
+97                   19
+89                   23
+83                   29
+79                   31
+73                   37
+71 67 61 59 53 47 43 41 
+
+'''
+
 """Q2) You are a data analyst at a streaming platform, managing user interactions, analytics,
 and daily operations. Use a for loop to create a text-based graph of hourly views. For
 example, use * to represent every 5 views.
@@ -61,6 +74,23 @@ for i in range(n):
   print("Hour {}--> {}".format(i,ch*star[i]))
 
 """
+'''  
+Output : 
+Enter the number of hours--> 5
+Hour 1 ->12
+Hour 2 ->23
+Hour 3 ->45
+Hour 4 ->28
+Hour 5 ->31
+[12, 23, 45, 28, 31]
+[2, 4, 9, 5, 6]
+Hour 0--> **
+Hour 1--> ****
+Hour 2--> *********
+Hour 3--> *****
+Hour 4--> ******
+
+'''
 Q3) Each video watched generates revenue based on ad impressions:
  First 10 views: $0.50 per view
  Next 20 views: $0.30 per view
@@ -79,4 +109,31 @@ elif t < 30:
 else:
   r = 10 *0.5 + 20*0.30 + (t-30)*0.10
 print("Total daily revenue--> $0",r)
-
+''' 
+ output :
+ Hour 1 ->10
+Hour 2 ->25
+Hour 3 ->23
+Hour 4 ->21
+Hour 5 ->24
+Hour 6 ->56
+Hour 7 ->55
+Hour 8 ->57
+Hour 9 ->58
+Hour 10 ->142
+Hour 11 ->106
+Hour 12 ->21
+Hour 13 ->0
+Hour 14 ->0
+Hour 15 ->14
+Hour 16 ->24
+Hour 17 ->57
+Hour 18 ->59
+Hour 19 ->56
+Hour 20 ->10
+Hour 21 ->14
+Hour 22 ->22
+Hour 23 ->55
+Hour 24 ->4
+Total daily revenue--> $ 99.30000000000001
+'''
