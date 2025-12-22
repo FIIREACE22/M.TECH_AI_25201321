@@ -1,0 +1,22 @@
+When allocating memory for an array of structures in C, both malloc and calloc can be used, but they differ mainly in two ways: how memory is allocated and how it is initialized.
+
+malloc stands for "memory allocation." It allocates a block of memory of a given size, but it does not initialize the memory. This means that after using malloc, the memory contains garbage values (whatever data was already stored at that memory location). For example, if you allocate memory for an array of structures using:
+
+struct Student *s = (struct Student*) malloc(5 * sizeof(struct Student));
+
+
+you get memory for 5 structures, but all their fields will have undefined values until you assign them.
+
+
+
+
+On the other hand, calloc stands for "contiguous allocation." It allocates memory for multiple elements and initializes all bytes in the allocated memory to zero. That means if you use calloc like this:
+
+struct Student *s = (struct Student*) calloc(5, sizeof(struct Student));
+
+
+you also get memory for 5 structures, but all the structure members will be set to zero by default. For example, int fields become 0, float fields become 0.0, and pointer fields become NULL.
+
+Another difference is in their function arguments. malloc takes one argument: the total number of bytes to allocate. calloc takes two arguments: the number of elements and the size of each element.
+
+malloc can be slightly faster because it doesn't initialize the memory, while calloc may take a bit more time as it sets all memory to zero.
