@@ -1,0 +1,465 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4"
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "code",
+      "source": [
+        "!pip install numba"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "0Zm6i9Cgmr-U",
+        "outputId": "d1be1a2b-b03a-4a7b-bfb3-fbf77892126f"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Requirement already satisfied: numba in /usr/local/lib/python3.12/dist-packages (0.60.0)\n",
+            "Requirement already satisfied: llvmlite<0.44,>=0.43.0dev0 in /usr/local/lib/python3.12/dist-packages (from numba) (0.43.0)\n",
+            "Requirement already satisfied: numpy<2.1,>=1.22 in /usr/local/lib/python3.12/dist-packages (from numba) (2.0.2)\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## ***Normal Case***"
+      ],
+      "metadata": {
+        "id": "_iZbY-1moMl_"
+      }
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {
+        "id": "584Dtf17j39N"
+      },
+      "outputs": [],
+      "source": [
+        "import numpy as np\n",
+        "from numba import cuda\n",
+        "\n",
+        "@cuda.jit\n",
+        "def reduce_kernel(input_arr, output_arr):\n",
+        "    # Shared memory\n",
+        "    sdata = cuda.shared.array(1024, dtype=numba.int32)\n",
+        "\n",
+        "    tid = cuda.threadIdx.x\n",
+        "    i = cuda.blockIdx.x * cuda.blockDim.x + tid\n",
+        "\n",
+        "    # Load data into shared memory\n",
+        "    if i < input_arr.size:\n",
+        "        sdata[tid] = input_arr[i]\n",
+        "    else:\n",
+        "        sdata[tid] = 0\n",
+        "    cuda.syncthreads()\n",
+        "\n",
+        "    # Reduction (tree pattern)\n",
+        "    stride = 1\n",
+        "    while stride < cuda.blockDim.x:\n",
+        "        if tid % (2 * stride) == 0:\n",
+        "            sdata[tid] += sdata[tid + stride]\n",
+        "        stride *= 2\n",
+        "        cuda.syncthreads()\n",
+        "\n",
+        "    # Write result\n",
+        "    if tid == 0:\n",
+        "        output_arr[cuda.blockIdx.x] = sdata[0]"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import numba\n",
+        "\n",
+        "# Input\n",
+        "arr = np.array([1,2,3,4,5,6,7,8], dtype=np.int32)\n",
+        "\n",
+        "# Device memory\n",
+        "d_input = cuda.to_device(arr)\n",
+        "d_output = cuda.device_array(1, dtype=np.int32)\n",
+        "\n",
+        "# Launch kernel\n",
+        "threads_per_block = 8\n",
+        "blocks = 1\n",
+        "\n",
+        "reduce_kernel[blocks, threads_per_block](d_input, d_output)\n",
+        "\n",
+        "# Copy result back\n",
+        "result = d_output.copy_to_host()\n",
+        "\n",
+        "print(\"Final Sum:\", result[0])"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "NT-NyhUCml0_",
+        "outputId": "27c35e77-bb61-4a67-9d61-99d483152bc0"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "/usr/local/lib/python3.12/dist-packages/numba_cuda/numba/cuda/dispatcher.py:696: NumbaPerformanceWarning: Grid size 1 will likely result in GPU under-utilization due to low occupancy.\n",
+            "  warn(errors.NumbaPerformanceWarning(msg))\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Final Sum: 36\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## ***Handle odd number case and take input from user***"
+      ],
+      "metadata": {
+        "id": "qvUeUEkxnShx"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import numpy as np\n",
+        "import numba\n",
+        "from numba import cuda\n",
+        "\n",
+        "@cuda.jit\n",
+        "def reduce_kernel(input_arr, output_arr, n):\n",
+        "    # Dynamic shared memory\n",
+        "    sdata = cuda.shared.array(shape=0, dtype=numba.int32)\n",
+        "\n",
+        "    tid = cuda.threadIdx.x\n",
+        "    i = cuda.blockIdx.x * cuda.blockDim.x + tid\n",
+        "\n",
+        "    # Load elements safely\n",
+        "    if i < n:\n",
+        "        sdata[tid] = input_arr[i]\n",
+        "    else:\n",
+        "        sdata[tid] = 0\n",
+        "    cuda.syncthreads()\n",
+        "\n",
+        "    # Tree-based reduction\n",
+        "    stride = 1\n",
+        "    while stride < cuda.blockDim.x:\n",
+        "        index = 2 * stride * tid\n",
+        "        if index < cuda.blockDim.x and index + stride < n:\n",
+        "            sdata[index] += sdata[index + stride]\n",
+        "        stride *= 2\n",
+        "        cuda.syncthreads()\n",
+        "\n",
+        "    # Write block result\n",
+        "    if tid == 0:\n",
+        "        output_arr[cuda.blockIdx.x] = sdata[0]"
+      ],
+      "metadata": {
+        "id": "HRRVZlb5mzD9"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Take input from user\n",
+        "user_input = input(\"Enter numbers separated by space: \")\n",
+        "arr = np.array(list(map(int, user_input.split())), dtype=np.int32)\n",
+        "\n",
+        "n = len(arr)\n",
+        "\n",
+        "# GPU memory\n",
+        "d_input = cuda.to_device(arr)\n",
+        "\n",
+        "threads_per_block = 1\n",
+        "while threads_per_block < n:\n",
+        "    threads_per_block *= 2   # next power of 2\n",
+        "\n",
+        "blocks = 1\n",
+        "\n",
+        "d_output = cuda.device_array(blocks, dtype=np.int32)\n",
+        "\n",
+        "# Launch kernel (dynamic shared memory)\n",
+        "reduce_kernel[blocks, threads_per_block, 0, threads_per_block * 4](d_input, d_output, n)\n",
+        "\n",
+        "# Get result\n",
+        "result = d_output.copy_to_host()\n",
+        "\n",
+        "print(\"Final Sum:\", result[0])"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "vTJ9EqyMnkG-",
+        "outputId": "304084d1-fa06-4823-c255-fd8126e6dbd4"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter numbers separated by space: 2 34 5 67 5 43 2 1\n",
+            "Final Sum: 159\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "/usr/local/lib/python3.12/dist-packages/numba_cuda/numba/cuda/dispatcher.py:696: NumbaPerformanceWarning: Grid size 1 will likely result in GPU under-utilization due to low occupancy.\n",
+            "  warn(errors.NumbaPerformanceWarning(msg))\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## ***Take numbers randomly with user giving number of values in input***"
+      ],
+      "metadata": {
+        "id": "H_f_JhR9nsLL"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import numpy as np\n",
+        "import numba\n",
+        "from numba import cuda\n",
+        "import random\n",
+        "\n",
+        "@cuda.jit\n",
+        "def reduce_kernel(input_arr, output_arr, n):\n",
+        "    sdata = cuda.shared.array(shape=0, dtype=numba.int32)\n",
+        "\n",
+        "    tid = cuda.threadIdx.x\n",
+        "    i = cuda.blockIdx.x * cuda.blockDim.x + tid\n",
+        "\n",
+        "    # Load into shared memory safely\n",
+        "    if i < n:\n",
+        "        sdata[tid] = input_arr[i]\n",
+        "    else:\n",
+        "        sdata[tid] = 0\n",
+        "    cuda.syncthreads()\n",
+        "\n",
+        "    # Reduction (tree pattern)\n",
+        "    stride = 1\n",
+        "    while stride < cuda.blockDim.x:\n",
+        "        index = 2 * stride * tid\n",
+        "        if index < cuda.blockDim.x and index + stride < cuda.blockDim.x:\n",
+        "            sdata[index] += sdata[index + stride]\n",
+        "        stride *= 2\n",
+        "        cuda.syncthreads()\n",
+        "\n",
+        "    # Write result\n",
+        "    if tid == 0:\n",
+        "        output_arr[cuda.blockIdx.x] = sdata[0]\n",
+        "\n",
+        "\n",
+        "#  User input (number of elements)\n",
+        "n = int(input(\"Enter number of elements: \"))\n",
+        "\n",
+        "# Generate random numbers\n",
+        "arr = np.array([random.randint(1, 10) for _ in range(n)], dtype=np.int32)\n",
+        "\n",
+        "print(\"Generated array:\", arr)\n",
+        "\n",
+        "# GPU memory\n",
+        "d_input = cuda.to_device(arr)\n",
+        "\n",
+        "# Next power of 2 for threads\n",
+        "threads_per_block = 1\n",
+        "while threads_per_block < n:\n",
+        "    threads_per_block *= 2\n",
+        "\n",
+        "blocks = 1\n",
+        "d_output = cuda.device_array(blocks, dtype=np.int32)\n",
+        "\n",
+        "# Launch kernel\n",
+        "reduce_kernel[blocks, threads_per_block, 0, threads_per_block * 4](d_input, d_output, n)\n",
+        "\n",
+        "# Result\n",
+        "result = d_output.copy_to_host()\n",
+        "\n",
+        "print(\"Final Sum:\", result[0])"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "nBvinDJGnkzi",
+        "outputId": "3f0e4d6c-2be0-46b1-b591-7dcabd4c3891"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter number of elements: 1024\n",
+            "Generated array: [ 9  1 10 ...  2  6  3]\n",
+            "Final Sum: 5669\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "/usr/local/lib/python3.12/dist-packages/numba_cuda/numba/cuda/dispatcher.py:696: NumbaPerformanceWarning: Grid size 1 will likely result in GPU under-utilization due to low occupancy.\n",
+            "  warn(errors.NumbaPerformanceWarning(msg))\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### ***Multibox reduction***"
+      ],
+      "metadata": {
+        "id": "8qlajNuYpCBq"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import numpy as np\n",
+        "import numba\n",
+        "from numba import cuda\n",
+        "import random\n",
+        "import math\n",
+        "\n",
+        "@cuda.jit\n",
+        "def reduce_kernel(input_arr, output_arr, n):\n",
+        "    sdata = cuda.shared.array(shape=0, dtype=numba.int32)\n",
+        "\n",
+        "    tid = cuda.threadIdx.x\n",
+        "    i = cuda.blockIdx.x * cuda.blockDim.x + tid\n",
+        "\n",
+        "    # Load into shared memory\n",
+        "    if i < n:\n",
+        "        sdata[tid] = input_arr[i]\n",
+        "    else:\n",
+        "        sdata[tid] = 0\n",
+        "    cuda.syncthreads()\n",
+        "\n",
+        "    # Reduction within block\n",
+        "    stride = cuda.blockDim.x // 2\n",
+        "    while stride > 0:\n",
+        "        if tid < stride:\n",
+        "            sdata[tid] += sdata[tid + stride]\n",
+        "        stride //= 2\n",
+        "        cuda.syncthreads()\n",
+        "\n",
+        "    # Write result of block\n",
+        "    if tid == 0:\n",
+        "        output_arr[cuda.blockIdx.x] = sdata[0]\n",
+        "\n",
+        "\n",
+        "# User input\n",
+        "n = int(input(\"Enter number of elements: \"))\n",
+        "\n",
+        "# Random input\n",
+        "arr = np.array([random.randint(1, 10) for _ in range(n)], dtype=np.int32)\n",
+        "\n",
+        "print(\"Generated array (first 20 elements):\", arr[:20])\n",
+        "\n",
+        "# Copy to GPU\n",
+        "d_input = cuda.to_device(arr)\n",
+        "\n",
+        "threads_per_block = 256\n",
+        "\n",
+        "# Multi-pass reduction\n",
+        "while True:\n",
+        "    blocks = math.ceil(n / threads_per_block)\n",
+        "\n",
+        "    d_output = cuda.device_array(blocks, dtype=np.int32)\n",
+        "\n",
+        "    # Launch kernel\n",
+        "    reduce_kernel[blocks, threads_per_block, 0, threads_per_block * 4](d_input, d_output, n)\n",
+        "\n",
+        "    if blocks == 1:\n",
+        "        break\n",
+        "\n",
+        "    # Prepare for next iteration\n",
+        "    d_input = d_output\n",
+        "    n = blocks\n",
+        "\n",
+        "# Final result\n",
+        "result = d_output.copy_to_host()\n",
+        "\n",
+        "print(\"Final Sum:\", result[0])"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "3FipeIuEodoZ",
+        "outputId": "0aa47daf-237f-4a5d-b516-be6880dbc143"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Enter number of elements: 10345\n",
+            "Generated array (first 20 elements): [ 5  7  1  8  4 10  2  6  9  2  2  3  4 10  4 10  7  8  3  1]\n",
+            "Final Sum: 56825\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "/usr/local/lib/python3.12/dist-packages/numba_cuda/numba/cuda/dispatcher.py:696: NumbaPerformanceWarning: Grid size 41 will likely result in GPU under-utilization due to low occupancy.\n",
+            "  warn(errors.NumbaPerformanceWarning(msg))\n",
+            "/usr/local/lib/python3.12/dist-packages/numba_cuda/numba/cuda/dispatcher.py:696: NumbaPerformanceWarning: Grid size 1 will likely result in GPU under-utilization due to low occupancy.\n",
+            "  warn(errors.NumbaPerformanceWarning(msg))\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "wHYSAqnSpJpM"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
